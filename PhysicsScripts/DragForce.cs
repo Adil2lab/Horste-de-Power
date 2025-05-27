@@ -43,6 +43,7 @@ public class BrakeSettings
     public float brakeTemp = 400f; // °C
     [Range(800f, 900f)]
     public float fadeStartTemp = 800f; // °C
+    [Range(0.001f, 0.003f)]
     public float fadeFactor = 0.002f; // per °C
     
     [Header("Heat Generation")]
