@@ -119,12 +119,14 @@ public class F1SuspensionSystem : MonoBehaviour
         ApplySuspensionForces();
     }
     
+    // Replace line 133 and surrounding method:
     void UpdateWheelSuspension(WheelData wheel, SuspensionSettings settings, float deltaTime)
     {
         if (wheel.wheelCollider == null) return;
         
+        // Unity 6 compatible ground hit detection
         WheelHit hit;
-        bool isGrounded = wheel.wheelCollider.GetGroundHit(out hit);
+        bool isGrounded = wheel.wheelCollider.isGrounded && wheel.wheelCollider.GetGroundHit(out hit);
         
         if (isGrounded)
         {
