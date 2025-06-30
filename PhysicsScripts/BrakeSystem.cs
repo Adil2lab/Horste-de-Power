@@ -25,6 +25,27 @@ public class BrakeSettings
 }
 
 [System.Serializable]
+public class WheelPhysics
+{
+    [Header("Wheel Properties")]
+    public float wheelRadius = 0.33f; // meters
+    public float wheelMass = 20f; // kg
+    public float momentOfInertia = 2.2f; // kg⋅m² (calculated from mass and radius)
+    
+    [Header("Ground Contact")]
+    public LayerMask groundLayers = -1;
+    public float contactPatchLength = 0.2f; // meters
+    public float contactPatchWidth = 0.3f; // meters
+    public float maxGroundDistance = 1f; // max raycast distance
+    
+    [Header("Friction")]
+    public AnimationCurve frictionCurve = AnimationCurve.Linear(0, 1, 1, 0.7f);
+    public float staticFrictionCoeff = 1.8f;
+    public float kineticFrictionCoeff = 1.2f;
+    public float rollingResistance = 0.015f;
+}
+
+[System.Serializable]
 public class WheelLockupSettings
 {
     [Header("Lock-up Thresholds")]
@@ -70,9 +91,19 @@ public class ABSSettings
 public class BrakeData
 {
     [Header("References")]
-    public WheelCollider wheelCollider;
+    public Transform wheelTransform; // Physical wheel position
     public Transform brakeDiscTransform; // For visual effects
     public Transform wheelMeshTransform; // For wheel rotation animation
+    public WheelPhysics wheelPhysics;
+    
+    [Header("Physics State")]
+    public float angularVelocity = 0f; // rad/s
+    public float wheelSpeed = 0f; // m/s (circumferential)
+    public Vector3 contactPoint = Vector3.zero;
+    public Vector3 contactNormal = Vector3.up;
+    public bool hasGroundContact = false;
+    public float groundDistance = 0f;
+    public RaycastHit groundHit;
     
     [Header("Brake State")]
     public float currentTemperature;
@@ -182,8 +213,8 @@ public class F1BrakingSystem : MonoBehaviour
             
         foreach (var brake in allBrakes)
         {
-            if (brake.wheelCollider == null)
-                Debug.LogWarning("Missing WheelCollider reference in brake system!");
+            if (brake.wheelTransform == null)
+                Debug.LogWarning("Missing wheel transform reference in brake system!");
         }
     }
     
@@ -200,6 +231,7 @@ public class F1BrakingSystem : MonoBehaviour
             brake.currentGripCoefficient = lockupSettings.isWetSurface ? 
                 lockupSettings.wetGripCoefficient : lockupSettings.dryGripCoefficient;
             brake.absBrakeMultiplier = 1f;
+            brake.angularVelocity = 0f;
         }
     }
     
@@ -225,6 +257,9 @@ public class F1BrakingSystem : MonoBehaviour
         Vector3 acceleration = (vehicleRigidbody.velocity - lastVelocity) / deltaTime;
         lastVelocity = vehicleRigidbody.velocity;
         
+        // Update wheel physics
+        UpdateWheelPhysics(deltaTime);
+        
         // Update brake system
         UpdateBrakeForces(deltaTime);
         
@@ -244,10 +279,39 @@ public class F1BrakingSystem : MonoBehaviour
         }
         
         // Apply brake forces
-        ApplyBrakeForces();
+        ApplyBrakeForces(deltaTime);
         
         // Update system states
         UpdateSystemStates();
+    }
+    
+    void UpdateWheelPhysics(float deltaTime)
+    {
+        foreach (var brake in allBrakes)
+        {
+            if (brake.wheelTransform == null) continue;
+            
+            // Ground detection via raycast
+            Vector3 rayStart = brake.wheelTransform.position;
+            Vector3 rayDirection = -brake.wheelTransform.up;
+            
+            brake.hasGroundContact = Physics.Raycast(rayStart, rayDirection, out brake.groundHit, 
+                brake.wheelPhysics.maxGroundDistance, brake.wheelPhysics.groundLayers);
+            
+            if (brake.hasGroundContact)
+            {
+                brake.contactPoint = brake.groundHit.point;
+                brake.contactNormal = brake.groundHit.normal;
+                brake.groundDistance = brake.groundHit.distance;
+            }
+            else
+            {
+                brake.groundDistance = brake.wheelPhysics.maxGroundDistance;
+            }
+            
+            // Calculate wheel speed from angular velocity
+            brake.wheelSpeed = brake.angularVelocity * brake.wheelPhysics.wheelRadius;
+        }
     }
     
     void HandleBrakeInput()
@@ -311,27 +375,21 @@ public class F1BrakingSystem : MonoBehaviour
     {
         foreach (var brake in allBrakes)
         {
-            if (brake.wheelCollider == null) continue;
-            
-            // Get wheel hit info
-            WheelHit hit;
-            bool hasGroundContact = brake.wheelCollider.GetGroundHit(out hit);
-            
-            if (hasGroundContact && vehicleSpeed > 0.1f)
+            if (!brake.hasGroundContact || vehicleSpeed < 0.1f)
             {
-                // Calculate slip ratio: slip = (wheel_speed - vehicle_speed) / vehicle_speed
-                float wheelSpeed = Mathf.Abs(brake.wheelCollider.rpm * 2f * Mathf.PI * brake.wheelCollider.radius / 60f);
-                float forwardSpeed = Vector3.Dot(vehicleRigidbody.velocity, brake.wheelCollider.transform.forward);
-                
-                if (Mathf.Abs(forwardSpeed) > 0.1f)
-                {
-                    brake.slipRatio = Mathf.Abs((wheelSpeed - Mathf.Abs(forwardSpeed)) / Mathf.Abs(forwardSpeed));
-                    brake.slipRatio = Mathf.Clamp(brake.slipRatio, 0f, lockupSettings.maxSlipRatio);
-                }
-                else
-                {
-                    brake.slipRatio = 0f;
-                }
+                brake.slipRatio = 0f;
+                continue;
+            }
+            
+            // Get vehicle velocity in wheel's forward direction
+            Vector3 wheelForward = brake.wheelTransform.forward;
+            float vehicleForwardSpeed = Vector3.Dot(vehicleRigidbody.velocity, wheelForward);
+            
+            // Calculate slip ratio: slip = (wheel_speed - vehicle_speed) / |vehicle_speed|
+            if (Mathf.Abs(vehicleForwardSpeed) > 0.1f)
+            {
+                brake.slipRatio = Mathf.Abs((brake.wheelSpeed - vehicleForwardSpeed) / vehicleForwardSpeed);
+                brake.slipRatio = Mathf.Clamp(brake.slipRatio, 0f, lockupSettings.maxSlipRatio);
             }
             else
             {
@@ -459,17 +517,11 @@ public class F1BrakingSystem : MonoBehaviour
     {
         foreach (var brake in allBrakes)
         {
-            if (brake.wheelCollider == null) continue;
-            
             BrakeSettings settings = IsFrontBrake(brake) ? frontBrakes : rearBrakes;
-            
-            // Get wheel velocity
-            float wheelRPM = brake.wheelCollider.rpm;
-            float wheelVelocity = Mathf.Abs(wheelRPM * 2f * Mathf.PI * brake.wheelCollider.radius / 60f);
             
             // Calculate heat generation with lockup multiplier
             float lockupHeatMultiplier = 1f + (brake.lockupIntensity * lockupSettings.lockupHeatMultiplier);
-            brake.heatGeneration = brake.brakeForce * wheelVelocity * settings.efficiencyLoss * lockupHeatMultiplier;
+            brake.heatGeneration = brake.brakeForce * Mathf.Abs(brake.wheelSpeed) * settings.efficiencyLoss * lockupHeatMultiplier;
             
             // Calculate heat dissipation
             float tempDifference = brake.currentTemperature - settings.ambientTemperature;
@@ -502,58 +554,51 @@ public class F1BrakingSystem : MonoBehaviour
     {
         foreach (var brake in allBrakes)
         {
-            if (brake.wheelMeshTransform == null || brake.wheelCollider == null) continue;
+            if (brake.wheelMeshTransform == null) continue;
             
-            // Calculate target rotation speed
-            if (!brake.isLocked)
-            {
-                brake.targetWheelRotation = brake.wheelCollider.rpm * 6f * Time.deltaTime; // Convert RPM to degrees per frame
-            }
-            else
-            {
-                // Locked wheel rotates much slower or stops
-                brake.targetWheelRotation *= 0.95f; // Gradual stop
-            }
+            // Calculate rotation from angular velocity
+            float rotationDelta = brake.angularVelocity * Mathf.Rad2Deg * Time.deltaTime;
+            brake.currentWheelRotation += rotationDelta;
             
             // Apply rotation to wheel mesh
-            brake.currentWheelRotation += brake.targetWheelRotation;
             brake.wheelMeshTransform.localRotation = Quaternion.Euler(brake.currentWheelRotation, 0, 0);
         }
     }
     
-    void ApplyBrakeForces()
+    void ApplyBrakeForces(float deltaTime)
     {
         foreach (var brake in allBrakes)
         {
-            if (brake.wheelCollider != null)
+            if (!brake.hasGroundContact || brake.wheelTransform == null) continue;
+            
+            // Calculate brake torque and apply to wheel angular velocity
+            float brakeTorque = brake.brakeForce * brake.wheelPhysics.wheelRadius;
+            float angularDeceleration = brakeTorque / brake.wheelPhysics.momentOfInertia;
+            
+            // Apply braking deceleration
+            if (brake.isLocked)
             {
-                float brakeTorque = brake.brakeForce * brake.wheelCollider.radius;
-                brake.wheelCollider.brakeTorque = brakeTorque;
-                
-                // Modify friction curves for lockup
-                if (brake.isLocked && brake.lockupIntensity > 0.5f)
-                {
-                    WheelFrictionCurve forwardFriction = brake.wheelCollider.forwardFriction;
-                    WheelFrictionCurve sidewaysFriction = brake.wheelCollider.sidewaysFriction;
-                    
-                    forwardFriction.stiffness = brake.currentGripCoefficient * lockupSettings.lockupGripMultiplier;
-                    sidewaysFriction.stiffness = brake.currentGripCoefficient * lockupSettings.lockupGripMultiplier;
-                    
-                    brake.wheelCollider.forwardFriction = forwardFriction;
-                    brake.wheelCollider.sidewaysFriction = sidewaysFriction;
-                }
-                else
-                {
-                    WheelFrictionCurve forwardFriction = brake.wheelCollider.forwardFriction;
-                    WheelFrictionCurve sidewaysFriction = brake.wheelCollider.sidewaysFriction;
-                    
-                    forwardFriction.stiffness = brake.currentGripCoefficient;
-                    sidewaysFriction.stiffness = brake.currentGripCoefficient;
-                    
-                    brake.wheelCollider.forwardFriction = forwardFriction;
-                    brake.wheelCollider.sidewaysFriction = sidewaysFriction;
-                }
+                // Locked wheel stops rotating
+                brake.angularVelocity = Mathf.MoveTowards(brake.angularVelocity, 0f, angularDeceleration * deltaTime * 2f);
             }
+            else
+            {
+                // Normal braking
+                float targetAngularVel = Vector3.Dot(vehicleRigidbody.velocity, brake.wheelTransform.forward) / brake.wheelPhysics.wheelRadius;
+                brake.angularVelocity = Mathf.MoveTowards(brake.angularVelocity, targetAngularVel, angularDeceleration * deltaTime);
+            }
+            
+            // Calculate and apply friction force to vehicle
+            Vector3 wheelForward = brake.wheelTransform.forward;
+            Vector3 vehicleVelAtWheel = vehicleRigidbody.GetPointVelocity(brake.wheelTransform.position);
+            float forwardVel = Vector3.Dot(vehicleVelAtWheel, wheelForward);
+            
+            // Calculate friction based on slip and grip
+            float maxFriction = brake.currentGripCoefficient * brake.brakeForce;
+            Vector3 frictionForce = -wheelForward * Mathf.Min(maxFriction, Mathf.Abs(forwardVel) * 1000f);
+            
+            // Apply force to vehicle
+            vehicleRigidbody.AddForceAtPosition(frictionForce, brake.contactPoint);
         }
     }
     
@@ -678,7 +723,7 @@ public class F1BrakingSystem : MonoBehaviour
         if (temperature < 800f) return Color.Lerp(Color.red, Color.yellow, (temperature - 600f) / 200f);
         return Color.Lerp(Color.yellow, Color.white, Mathf.Min((temperature - 800f) / 300f, 1f));
     }
-    
+
     bool IsFrontBrake(BrakeData brake)
     {
         return brake == frontLeftBrake || brake == frontRightBrake;
