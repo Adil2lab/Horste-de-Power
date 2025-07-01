@@ -69,6 +69,26 @@ public class GearboxSettings
     private float shiftTimer = 0f;
 }
 
+[System.Serializable]
+public class TractionSettings
+{
+    [Header("Tire Properties")]
+    public float maxTireMu = 1.8f; // Peak friction coefficient
+    public float wheelRadius = 0.33f; // meters
+    public float wheelInertia = 2.5f; // kg⋅m² per wheel
+    public float contactPatchArea = 0.03f; // m² per tire
+    
+    [Header("Traction Control")]
+    public bool tractionControlEnabled = true;
+    public float slipThreshold = 0.15f; // 15% slip threshold
+    public float tractionControlAggressiveness = 0.8f;
+    
+    [Header("Surface Conditions")]
+    [Range(0.1f, 1.0f)]
+    public float surfaceGrip = 1.0f; // 1.0 = dry, 0.3 = wet
+    public float rollingResistance = 0.012f;
+}
+
 public class F1EngineSystem : MonoBehaviour
 {
     [Header("Engine Components")]
@@ -76,6 +96,7 @@ public class F1EngineSystem : MonoBehaviour
     public ERSSettings ers;
     public FuelSettings fuel;
     public GearboxSettings gearbox;
+    public TractionSettings traction;
     
     [Header("Input")]
     [Range(0f, 1f)]
@@ -88,6 +109,12 @@ public class F1EngineSystem : MonoBehaviour
     public float totalPower = 0f;
     public float wheelTorque = 0f;
     
+    [Header("Wheel Dynamics")]
+    public float wheelRPM = 0f;
+    public float wheelSpinRatio = 0f; // 0 = no spin, >0 = spinning
+    public float availableTraction = 0f;
+    public bool isWheelSpinning = false;
+    
     [Header("Debug")]
     public bool showDebugInfo = true;
     
@@ -95,6 +122,8 @@ public class F1EngineSystem : MonoBehaviour
     private float targetRPM;
     private float ersTorque = 0f;
     private float wheelSpeed = 0f;
+    private float effectiveWheelTorque = 0f;
+    private float tractionLimitedTorque = 0f;
     
     void Start()
     {
@@ -108,25 +137,64 @@ public class F1EngineSystem : MonoBehaviour
     
     void FixedUpdate()
     {
+        UpdateWheelDynamics();
         UpdateEngineRPM();
         CalculateICEPower();
         UpdateERSSystem();
         UpdateFuelConsumption();
         UpdateGearbox();
+        CalculateTractionLimits();
+        ApplyTractionControl();
         ApplyEngineForces();
+    }
+    
+    void UpdateWheelDynamics()
+    {
+        // Calculate actual wheel speed from vehicle velocity
+        wheelSpeed = vehicleRigidbody.velocity.magnitude;
+        float theoreticalWheelRPM = (wheelSpeed * 60f) / (2f * Mathf.PI * traction.wheelRadius);
+        
+        // Calculate wheel spin - difference between driven RPM and actual RPM
+        if (gearbox.currentGear > 0 && !gearbox.isShifting)
+        {
+            float totalRatio = gearbox.gearRatios[gearbox.currentGear - 1] * 
+                              gearbox.finalDriveRatio * gearbox.primaryRatio;
+            float drivenWheelRPM = currentRPM / totalRatio;
+            
+            wheelRPM = drivenWheelRPM;
+            wheelSpinRatio = Mathf.Max(0f, (drivenWheelRPM - theoreticalWheelRPM) / 
+                                      Mathf.Max(theoreticalWheelRPM, 100f));
+        }
+        else
+        {
+            wheelRPM = theoreticalWheelRPM;
+            wheelSpinRatio = 0f;
+        }
+        
+        isWheelSpinning = wheelSpinRatio > traction.slipThreshold;
     }
     
     void UpdateEngineRPM()
     {
-        // Calculate wheel speed and engine RPM relationship
-        wheelSpeed = vehicleRigidbody.velocity.magnitude;
-        float wheelRPM = (wheelSpeed * 60f) / (2f * Mathf.PI * 0.33f); // 0.33m wheel radius
+        // Base RPM calculation from wheel speed
+        float wheelRPMFromSpeed = (wheelSpeed * 60f) / (2f * Mathf.PI * traction.wheelRadius);
         
         if (gearbox.currentGear > 0 && !gearbox.isShifting)
         {
             float totalRatio = gearbox.gearRatios[gearbox.currentGear - 1] * 
                               gearbox.finalDriveRatio * gearbox.primaryRatio;
-            targetRPM = wheelRPM * totalRatio;
+            
+            // If wheels are spinning, engine RPM can exceed what vehicle speed would suggest
+            if (isWheelSpinning)
+            {
+                // Engine RPM increases with throttle when spinning
+                targetRPM = Mathf.Lerp(wheelRPMFromSpeed * totalRatio, 
+                                     ice.maxRPM * 0.9f, throttleInput);
+            }
+            else
+            {
+                targetRPM = wheelRPMFromSpeed * totalRatio;
+            }
         }
         else
         {
@@ -134,11 +202,14 @@ public class F1EngineSystem : MonoBehaviour
         }
         
         // Apply throttle influence on RPM
-        targetRPM = Mathf.Lerp(ice.idleRPM, targetRPM + (throttleInput * 2000f), throttleInput);
+        targetRPM = Mathf.Lerp(ice.idleRPM, 
+                              targetRPM + (throttleInput * 2000f), 
+                              throttleInput);
         targetRPM = Mathf.Clamp(targetRPM, ice.idleRPM, ice.maxRPM);
         
-        // Smooth RPM changes
-        currentRPM = Mathf.Lerp(currentRPM, targetRPM, Time.fixedDeltaTime * 10f);
+        // Smooth RPM changes - faster when spinning
+        float rpmLerpRate = isWheelSpinning ? 15f : 10f;
+        currentRPM = Mathf.Lerp(currentRPM, targetRPM, Time.fixedDeltaTime * rpmLerpRate);
     }
     
     void CalculateICEPower()
@@ -187,14 +258,12 @@ public class F1EngineSystem : MonoBehaviour
         // ERS Recovery (MGU-K during braking/coasting)
         if (ers.autoHarvest && throttleInput < 0.3f && currentRPM > 3000f)
         {
-            // Simplified recovery calculation
             float recoveryPower = Mathf.Min(ers.maxRecoveryPower, ers.efficiency * enginePower * 0.1f);
             float energyRecovered = recoveryPower * Time.fixedDeltaTime;
             
             ers.currentEnergy = Mathf.Min(ers.currentEnergy + energyRecovered, ers.maxEnergyPerLap);
         }
         
-        // Clamp energy
         ers.currentEnergy = Mathf.Clamp(ers.currentEnergy, 0f, ers.maxEnergyPerLap);
         
         // Total power calculation
@@ -204,16 +273,13 @@ public class F1EngineSystem : MonoBehaviour
     
     void UpdateFuelConsumption()
     {
-        // Fuel flow calculation
         float engineLoad = throttleInput * (currentRPM / ice.maxRPM);
         fuel.currentFuelFlow = fuel.baseFuelConsumption * engineLoad;
         fuel.currentFuelFlow = Mathf.Min(fuel.currentFuelFlow, fuel.maxFuelFlow);
         
-        // Consume fuel
-        float fuelConsumed = (fuel.currentFuelFlow / 3600f) * Time.fixedDeltaTime; // Convert to kg/s
+        float fuelConsumed = (fuel.currentFuelFlow / 3600f) * Time.fixedDeltaTime;
         fuel.currentFuel = Mathf.Max(0f, fuel.currentFuel - fuelConsumed);
         
-        // Reduce power if out of fuel
         if (fuel.currentFuel <= 0f)
         {
             engineTorque = 0f;
@@ -223,7 +289,6 @@ public class F1EngineSystem : MonoBehaviour
     
     void UpdateGearbox()
     {
-        // Handle gear shifting
         if (gearbox.isShifting)
         {
             gearbox.shiftTimer += Time.fixedDeltaTime;
@@ -235,7 +300,7 @@ public class F1EngineSystem : MonoBehaviour
             return;
         }
         
-        // Calculate wheel torque
+        // Calculate raw wheel torque
         if (gearbox.currentGear > 0)
         {
             float totalRatio = gearbox.gearRatios[gearbox.currentGear - 1] * 
@@ -248,13 +313,57 @@ public class F1EngineSystem : MonoBehaviour
         }
     }
     
+    void CalculateTractionLimits()
+    {
+        // Calculate normal force (simplified - assumes flat surface)
+        float vehicleMass = vehicleRigidbody.mass;
+        float normalForce = vehicleMass * 9.81f; // Per axle assumption
+        
+        // Calculate available traction force
+        float maxTractionForce = traction.maxTireMu * traction.surfaceGrip * normalForce;
+        
+        // Convert to torque limit at wheels
+        tractionLimitedTorque = maxTractionForce * traction.wheelRadius;
+        
+        // Store available traction for display
+        availableTraction = maxTractionForce;
+        
+        // Apply slip curve - tire grip reduces with excessive slip
+        if (wheelSpinRatio > traction.slipThreshold)
+        {
+            float slipFactor = Mathf.Exp(-5f * (wheelSpinRatio - traction.slipThreshold));
+            tractionLimitedTorque *= slipFactor;
+        }
+    }
+    
+    void ApplyTractionControl()
+    {
+        if (traction.tractionControlEnabled && isWheelSpinning)
+        {
+            // Reduce engine torque when wheel spin detected
+            float reductionFactor = 1f - (traction.tractionControlAggressiveness * 
+                                         Mathf.Min(wheelSpinRatio, 1f));
+            
+            engineTorque *= reductionFactor;
+            wheelTorque *= reductionFactor;
+        }
+        
+        // Limit wheel torque to available traction
+        effectiveWheelTorque = Mathf.Min(Mathf.Abs(wheelTorque), tractionLimitedTorque) * 
+                              Mathf.Sign(wheelTorque);
+    }
+    
     void ApplyEngineForces()
     {
         if (gearbox.isShifting) return;
         
-        // Apply driving force to vehicle
-        float wheelRadius = 0.33f;
-        float drivingForce = wheelTorque / wheelRadius;
+        // Apply effective driving force (limited by traction)
+        float drivingForce = effectiveWheelTorque / traction.wheelRadius;
+        
+        // Subtract rolling resistance
+        float rollingResistanceForce = traction.rollingResistance * 
+                                      vehicleRigidbody.mass * 9.81f;
+        drivingForce -= rollingResistanceForce;
         
         // Apply force in forward direction
         Vector3 forceDirection = transform.forward;
@@ -270,6 +379,11 @@ public class F1EngineSystem : MonoBehaviour
     public void SetERSDeployment(float input)
     {
         ers.deploymentInput = Mathf.Clamp01(input);
+    }
+    
+    public void SetSurfaceGrip(float grip)
+    {
+        traction.surfaceGrip = Mathf.Clamp01(grip);
     }
     
     public void ShiftUp()
@@ -292,26 +406,43 @@ public class F1EngineSystem : MonoBehaviour
     
     // Getters
     public float GetCurrentRPM() => currentRPM;
+    public float GetWheelRPM() => wheelRPM;
+    public float GetWheelSpinRatio() => wheelSpinRatio;
     public float GetTotalPower() => totalPower;
+    public float GetEffectiveTorque() => effectiveWheelTorque;
+    public float GetTractionLimit() => tractionLimitedTorque;
     public float GetFuelRemaining() => fuel.currentFuel;
     public float GetERSEnergy() => ers.currentEnergy;
     public int GetCurrentGear() => gearbox.currentGear;
     public bool IsShifting() => gearbox.isShifting;
+    public bool IsWheelSpinning() => isWheelSpinning;
     
     void OnGUI()
     {
         if (!showDebugInfo) return;
         
-        GUILayout.BeginArea(new Rect(Screen.width - 250, 10, 240, 300));
+        GUILayout.BeginArea(new Rect(Screen.width - 300, 10, 290, 400));
         GUILayout.Label("=== F1 ENGINE TELEMETRY ===");
         GUILayout.Label($"RPM: {currentRPM:F0} / {ice.maxRPM:F0}");
+        GUILayout.Label($"Wheel RPM: {wheelRPM:F0}");
         GUILayout.Label($"Gear: {gearbox.currentGear}{(gearbox.isShifting ? " (Shifting)" : "")}");
         GUILayout.Label($"Throttle: {throttleInput * 100:F0}%");
+        GUILayout.Label($"");
+        GUILayout.Label("=== POWER ===");
         GUILayout.Label($"ICE Power: {enginePower:F0} kW");
         GUILayout.Label($"ERS Power: {(ersTorque * currentRPM * 2 * Mathf.PI / 60) / 1000:F0} kW");
         GUILayout.Label($"Total Power: {totalPower:F0} kW");
+        GUILayout.Label($"");
+        GUILayout.Label("=== TRACTION ===");
+        GUILayout.Label($"Wheel Spin: {wheelSpinRatio * 100:F1}% {(isWheelSpinning ? "SPINNING!" : "")}");
         GUILayout.Label($"Engine Torque: {engineTorque:F0} Nm");
         GUILayout.Label($"Wheel Torque: {wheelTorque:F0} Nm");
+        GUILayout.Label($"Effective Torque: {effectiveWheelTorque:F0} Nm");
+        GUILayout.Label($"Traction Limit: {tractionLimitedTorque:F0} Nm");
+        GUILayout.Label($"Surface Grip: {traction.surfaceGrip * 100:F0}%");
+        GUILayout.Label($"TC Active: {(traction.tractionControlEnabled && isWheelSpinning ? "YES" : "NO")}");
+        GUILayout.Label($"");
+        GUILayout.Label("=== FUEL & ERS ===");
         GUILayout.Label($"Fuel: {fuel.currentFuel:F1} / {fuel.maxFuelCapacity:F0} kg");
         GUILayout.Label($"Fuel Flow: {fuel.currentFuelFlow:F1} kg/h");
         GUILayout.Label($"ERS Energy: {ers.currentEnergy / 1000000:F2} / {ers.maxEnergyPerLap / 1000000:F1} MJ");
