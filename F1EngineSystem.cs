@@ -94,7 +94,10 @@ public class F1EngineSystem : MonoBehaviour
     public bool showDebugInfo = true;
     
     private Rigidbody vehicleRigidbody;
+    
+    [Range(0f, 15000f)]
     private float targetRPM;
+    
     private float ersTorque = 0f;
     private float wheelSpeed = 0f;
     
