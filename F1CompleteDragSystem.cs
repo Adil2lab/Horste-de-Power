@@ -53,7 +53,7 @@ public class BrakeSettings
     public float ambientTemp = 25f; // °C
 }
 
-public class F1CompleteDragSystem : MonoBehaviour
+public class F1AeroSystem : MonoBehaviour
 {
     [SerializeField] private AerodynamicSettings aeroSettings;
     [SerializeField] private RollingResistanceSettings rollingSettings;
