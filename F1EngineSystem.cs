@@ -83,7 +83,10 @@ public class F1EngineSystem : MonoBehaviour
     public float throttleInput = 0f;
     
     [Header("Output")]
+    
+    [Range(0f, 15000f)]
     public float currentRPM = 1500f;
+    
     public float engineTorque = 0f;
     public float enginePower = 0f;
     public float totalPower = 0f;
@@ -268,8 +271,14 @@ public class F1EngineSystem : MonoBehaviour
     void AutomaticGearbox()
     {
         if (!gearbox.isAutomatic) return;
-        
-        
+
+        if (currentRPM <= 801)
+        {
+            ShiftDown();
+        } else if (currentRPM >= 11000)
+        {
+            ShiftUp();
+        }
     }
     
     // Public control methods
