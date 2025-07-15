@@ -18,6 +18,8 @@ public class F1VehicleController : MonoBehaviour
     public KeyCode throttleKey;
     public KeyCode brakeKey;
 
+    public AnimationCurve curve;
+
     [Range(-1f, 1f)] public float steerAngle;
 
     public bool isController;
@@ -32,14 +34,17 @@ public class F1VehicleController : MonoBehaviour
         if (isController && Input.GetAxis("Vertical") >= 0f)
         {
             throttle = Input.GetAxis("Vertical");
+            brake = 0f;
         }
         else if (isController && Input.GetAxis("Vertical") <= 0f)
         {
             brake = Input.GetAxis("Vertical");
+            throttle = 0f;
         }
         else
         {
-            throttle = Input.GetKey(throttleKey) ? 1f : 0f;
+            throttle = Mathf.Lerp(throttle, Input.GetKey(throttleKey) ? 1f : 0f, curve.Evaluate(Time.fixedDeltaTime * 10f));
+            throttle = Input.GetKeyUp(throttleKey) ? 0f : throttle;
             brake = Input.GetKey(brakeKey) ? 1f : 0f;
         }
     }
