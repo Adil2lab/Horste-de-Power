@@ -20,6 +20,7 @@ public class F1VehicleController : MonoBehaviour
     [Range(-1f, 1f)] public float steerAngle;
 
     public bool isController;
+    public bool showDebug = false;
 
     private Vector3 _downForce;
     private float _dragForce;
@@ -49,5 +50,13 @@ public class F1VehicleController : MonoBehaviour
 
     private void OnGUI()
     {
+        if (!showDebug) return;
+        
+        GUILayout.BeginArea(new Rect(Screen.width - 250, 10, 240, 300));
+        GUILayout.Label("=== Inputs ===");
+        GUILayout.Label($"Throttle: {throttle}");
+        GUILayout.Label($"Brake: {brake}");
+        GUILayout.HorizontalSlider()
+        
     }
 }
