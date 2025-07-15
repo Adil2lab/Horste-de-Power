@@ -57,7 +57,7 @@ public class F1AeroSystem : MonoBehaviour
         // Drag force acts in the opposite direction of velocity
         return -direction * dragMagnitude;
     }
-
+    
     /// <summary>
     /// Calculates the aerodynamic downforce.
     /// Formula: F_downforce = 0.5 * ρ * v² * A * C_L
