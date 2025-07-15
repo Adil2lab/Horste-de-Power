@@ -12,6 +12,7 @@ public class F1VehicleController : MonoBehaviour
     public Rigidbody VehicleRB;
 
     [Header("Inputs"), Range(0f, 1f)] public float throttle;
+    [Range(0f, 1f)]
     public float brake;
 
     public KeyCode throttleKey;
@@ -32,7 +33,7 @@ public class F1VehicleController : MonoBehaviour
         {
             throttle = Input.GetAxis("Vertical");
         }
-        else if (isController && Input.GetAxis("Vertical") < 0f)
+        else if (isController && Input.GetAxis("Vertical") <= 0f)
         {
             brake = Input.GetAxis("Vertical");
         }
