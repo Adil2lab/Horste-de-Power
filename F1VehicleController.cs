@@ -16,15 +16,40 @@ public class F1VehicleController : MonoBehaviour
         public float throttle;
         public float brake;
         
+        public KeyCode throttleKey;
+        public KeyCode brakeKey;
+        
         [Range(-1f, 1f)]
         public float steerAngle;
 
+        public bool isController;
+
         private void Update()
         {
+                steerAngle = Input.GetAxis("Horizontal");
+                if (isController && Input.GetAxis("Vertical") >= 0f)
+                {
+                        throttle = Input.GetAxis("Vertical");
+                }
+                else if (isController && Input.GetAxis("Vertical") < 0f)
+                {
+                        brake = Input.GetAxis("Vertical");
+                }
+                else
+                {
+                        throttle = Input.GetKey(throttleKey) ? 1f : 0f;
+                        brake = Input.GetKey(brakeKey) ? 1f : 0f;
+                }
+                
                 
         }
 
         private void FixedUpdate()
+        {
+                
+        }
+
+        private void OnGUI()
         {
                 
         }
