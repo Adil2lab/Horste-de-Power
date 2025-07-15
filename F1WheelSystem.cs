@@ -60,13 +60,23 @@ public class TireWearSettings
 }
 
 [System.Serializable]
-public class WheelPhysics
+public class WheelData
 {
     [Header("Wheel Properties")]
+    public Transform wheelTransform; // Physical wheel position
+    public Transform wheelMeshTransform; // For wheel rotation animation
     public float radius = 0.33f; // meters
     public float width = 0.305f; // meters
     public float mass = 12f; // kg including tire
     public float inertia = 1.5f; // kg⋅m²
+    public float slipRatio = 0f;
+    
+    [Header("Physics")]
+    public Vector3 contactPoint = Vector3.zero;
+    public Vector3 contactNormal = Vector3.up;
+    public bool hasGroundContact = false;
+    public float groundDistance = 0f;
+    public RaycastHit groundHit;
     
     [Header("Contact Patch")]
     public float contactPatchArea = 300f; // cm²
@@ -88,7 +98,7 @@ public class F1WheelSystem : MonoBehaviour
     public PacejkaCoefficients pacejka;
     public TireTemperatureSettings temperature;
     public TireWearSettings wear;
-    public WheelPhysics physics;
+    public WheelData physics;
     
     [Header("Runtime Values")]
     public float slipAngle = 0f; // radians
@@ -128,6 +138,32 @@ public class F1WheelSystem : MonoBehaviour
         UpdateTireTemperature();
         UpdateTireWear();
         ApplyForces();
+    }
+
+    void UpdateWheelSys()
+    {
+        if (physics.wheelTransform == null) continue;
+            
+        // Ground detection via raycast
+        Vector3 rayStart = physics.wheelTransform.position;
+        Vector3 rayDirection = -physics.wheelTransform.up;
+            
+        physics.hasGroundContact = Physics.Raycast(rayStart, rayDirection, out physics.groundHit, 
+            physics.WheelPhysicsSys.maxGroundDistance, physics.WheelPhysicsSys.groundLayers);
+            
+        if (physics.hasGroundContact)
+        {
+            physics.contactPoint = physics.groundHit.point;
+            physics.contactNormal = physics.groundHit.normal;
+            physics.groundDistance = physics.groundHit.distance;
+        }
+        else
+        {
+            physics.groundDistance = physics.WheelPhysicsSys.maxGroundDistance;
+        }
+            
+        // Calculate wheel speed from angular velocity
+        physics.wheelSpeed = physics.angularVelocity * physics.WheelPhysicsSys.wheelRadius;
     }
     
     void UpdateWheelPhysics()
@@ -276,6 +312,11 @@ public class F1WheelSystem : MonoBehaviour
     public float GetTireWear()
     {
         return wear.currentWear;
+    }
+
+    public bool GetTyreContact()
+    {
+        return physics.hasGroundContact;
     }
     
     public Vector3 GetTotalForce()

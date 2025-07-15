@@ -20,7 +20,7 @@ public class SuspensionSettings
 }
 
 [System.Serializable]
-public class WheelData
+public class wheelSuspensionData 
 {
     public Transform wheelTransform;
     public Transform suspensionAnchor; // Upper attachment point
@@ -39,10 +39,10 @@ public class F1SuspensionSystem : MonoBehaviour
     public SuspensionSettings rearSuspension;
     
     [Header("Wheel References")]
-    public WheelData frontLeft;
-    public WheelData frontRight;
-    public WheelData rearLeft;
-    public WheelData rearRight;
+    public wheelSuspensionData  frontLeft;
+    public wheelSuspensionData  frontRight;
+    public wheelSuspensionData  rearLeft;
+    public wheelSuspensionData  rearRight;
     
     [Header("Vehicle Properties")]
     public Rigidbody vehicleRigidbody;
@@ -55,13 +55,13 @@ public class F1SuspensionSystem : MonoBehaviour
     public bool showCompressionDebug = true;
     public float forceVisualizationScale = 0.001f;
     
-    private WheelData[] allWheels;
+    private wheelSuspensionData [] allWheels;
     private float lastFixedUpdateTime;
     
     void Start()
     {
         // Initialize wheel array for easier iteration
-        allWheels = new WheelData[] { frontLeft, frontRight, rearLeft, rearRight };
+        allWheels = new wheelSuspensionData [] { frontLeft, frontRight, rearLeft, rearRight };
         
         // Validate references
         ValidateReferences();
@@ -119,7 +119,7 @@ public class F1SuspensionSystem : MonoBehaviour
         ApplySuspensionForces();
     }
     
-    void UpdateWheelSuspension(WheelData wheel, SuspensionSettings settings, float deltaTime)
+    void UpdateWheelSuspension(wheelSuspensionData wheel, SuspensionSettings settings, float deltaTime)
     {
         if (wheel.wheelCollider == null) return;
         
@@ -182,7 +182,7 @@ public class F1SuspensionSystem : MonoBehaviour
         return -settings.dampingCoefficient * compressionVelocity * multiplier;
     }
     
-    void ApplyAntiRollBar(WheelData leftWheel, WheelData rightWheel, 
+    void ApplyAntiRollBar(wheelSuspensionData leftWheel, wheelSuspensionData rightWheel, 
         SuspensionSettings settings, float trackWidth)
     {
         if (!settings.useAntiRollBar) return;
@@ -283,7 +283,7 @@ public class F1SuspensionSystem : MonoBehaviour
         }
     }
     
-    bool IsWheelFront(WheelData wheel)
+    bool IsWheelFront(wheelSuspensionData wheel)
     {
         return wheel == frontLeft || wheel == frontRight;
     }

@@ -54,6 +54,11 @@ public class F1VehicleController : MonoBehaviour
         _downForce = AeroSys.GetDownforce(VehicleRB.linearVelocity);
     }
 
+    public float GetBrakeInput()
+    {
+        return brake;
+    }
+
     private void OnGUI()
     {
         if (!showDebug) return;

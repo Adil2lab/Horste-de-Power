@@ -99,11 +99,7 @@ public class BrakeData
     [Header("Physics State")]
     public float angularVelocity = 0f; // rad/s
     public float wheelSpeed = 0f; // m/s (circumferential)
-    public Vector3 contactPoint = Vector3.zero;
-    public Vector3 contactNormal = Vector3.up;
-    public bool hasGroundContact = false;
-    public float groundDistance = 0f;
-    public RaycastHit groundHit;
+    public bool hasGroundContact;
     
     [Header("Brake State")]
     public float currentTemperature;
@@ -115,7 +111,6 @@ public class BrakeData
     [Header("Lock-up State")]
     public bool isLocked = false;
     public bool wasLocked = false;
-    public float slipRatio = 0f;
     public float lockupIntensity = 0f; // 0-1, how locked the wheel is
     public float currentGripCoefficient = 1.8f;
     public float flatSpotDamage = 0f; // Accumulated tire damage
@@ -154,17 +149,12 @@ public class F1BrakingSystem : MonoBehaviour
     public BrakeData frontRightBrake;
     public BrakeData rearLeftBrake;
     public BrakeData rearRightBrake;
+    public WheelData[] Wheels;
     
     [Header("Vehicle References")]
     public Rigidbody vehicleRigidbody;
     public Transform centerOfMass;
-    
-    [Header("Input")]
-    [Range(0f, 1f)]
-    public float brakeInput = 0f; // 0-1 brake pedal input
-    public KeyCode brakeKey = KeyCode.Space;
-    public KeyCode absToggleKey = KeyCode.B;
-    public string brakeInputAxis = "Fire1"; // For input manager
+    public F1VehicleController VController;
     
     [Header("Advanced Settings")]
     public bool useTemperatureSimulation = true;
@@ -180,6 +170,7 @@ public class F1BrakingSystem : MonoBehaviour
     public float forceVisualizationScale = 0.0001f;
     
     private BrakeData[] allBrakes;
+    private float brakeInput;
     private float vehicleSpeed;
     private float lastUpdateTime;
     private Vector3 lastVelocity;
@@ -237,8 +228,6 @@ public class F1BrakingSystem : MonoBehaviour
     
     void Update()
     {
-        // Handle input
-        HandleBrakeInput();
         
         // Update visual effects
         if (enableVisualEffects)
@@ -279,7 +268,6 @@ public class F1BrakingSystem : MonoBehaviour
         }
         
         // Apply brake forces
-        ApplyBrakeForces(deltaTime);
         
         // Update system states
         UpdateSystemStates();
@@ -289,56 +277,8 @@ public class F1BrakingSystem : MonoBehaviour
     {
         foreach (var brake in allBrakes)
         {
-            if (brake.wheelTransform == null) continue;
             
-            // Ground detection via raycast
-            Vector3 rayStart = brake.wheelTransform.position;
-            Vector3 rayDirection = -brake.wheelTransform.up;
-            
-            brake.hasGroundContact = Physics.Raycast(rayStart, rayDirection, out brake.groundHit, 
-                brake.WheelPhysicsSys.maxGroundDistance, brake.WheelPhysicsSys.groundLayers);
-            
-            if (brake.hasGroundContact)
-            {
-                brake.contactPoint = brake.groundHit.point;
-                brake.contactNormal = brake.groundHit.normal;
-                brake.groundDistance = brake.groundHit.distance;
-            }
-            else
-            {
-                brake.groundDistance = brake.WheelPhysicsSys.maxGroundDistance;
-            }
-            
-            // Calculate wheel speed from angular velocity
-            brake.wheelSpeed = brake.angularVelocity * brake.WheelPhysicsSys.wheelRadius;
         }
-    }
-    
-    void HandleBrakeInput()
-    {
-        // Get brake input from multiple sources
-        float keyInput = Input.GetKey(brakeKey) ? 1f : 0f;
-        float axisInput = 0f;
-        
-        try
-        {
-            axisInput = Input.GetAxis(brakeInputAxis);
-        }
-        catch
-        {
-            // Input axis not configured, use key input only
-        }
-        
-        // Toggle ABS
-        if (Input.GetKeyDown(absToggleKey))
-        {
-            absSettings.absEnabled = !absSettings.absEnabled;
-            Debug.Log($"ABS {(absSettings.absEnabled ? "Enabled" : "Disabled")}");
-        }
-        
-        // Use the maximum input value
-        brakeInput = Mathf.Max(keyInput, axisInput);
-        brakeInput = Mathf.Clamp01(brakeInput);
     }
     
     void UpdateBrakeForces(float deltaTime)
@@ -565,47 +505,17 @@ public class F1BrakingSystem : MonoBehaviour
         }
     }
     
-    void ApplyBrakeForces(float deltaTime)
-    {
-        foreach (var brake in allBrakes)
-        {
-            if (!brake.hasGroundContact || brake.wheelTransform == null) continue;
-            
-            // Calculate brake torque and apply to wheel angular velocity
-            float brakeTorque = brake.brakeForce * brake.WheelPhysicsSys.wheelRadius;
-            float angularDeceleration = brakeTorque / brake.WheelPhysicsSys.momentOfInertia;
-            
-            // Apply braking deceleration
-            if (brake.isLocked)
-            {
-                // Locked wheel stops rotating
-                brake.angularVelocity = Mathf.MoveTowards(brake.angularVelocity, 0f, angularDeceleration * deltaTime * 2f);
-            }
-            else
-            {
-                // Normal braking
-                float targetAngularVel = Vector3.Dot(vehicleRigidbody.linearVelocity, brake.wheelTransform.forward) / brake.WheelPhysicsSys.wheelRadius;
-                brake.angularVelocity = Mathf.MoveTowards(brake.angularVelocity, targetAngularVel, angularDeceleration * deltaTime);
-            }
-            
-            // Calculate and apply friction force to vehicle
-            Vector3 wheelForward = brake.wheelTransform.forward;
-            Vector3 vehicleVelAtWheel = vehicleRigidbody.GetPointVelocity(brake.wheelTransform.position);
-            float forwardVel = Vector3.Dot(vehicleVelAtWheel, wheelForward);
-            
-            // Calculate friction based on slip and grip
-            float maxFriction = brake.currentGripCoefficient * brake.brakeForce;
-            Vector3 frictionForce = -wheelForward * Mathf.Min(maxFriction, Mathf.Abs(forwardVel) * 1000f);
-            
-            // Apply force to vehicle
-            vehicleRigidbody.AddForceAtPosition(frictionForce, brake.contactPoint);
-        }
-    }
-    
     void UpdateSystemStates()
     {
         // Update overall system states for external systems (UI, telemetry, etc.)
         // This can be used by other systems to react to brake conditions
+
+        brakeInput = VController.GetBrakeInput();
+        
+        for (var i = 0; i >= allBrakes.Length; i++)
+        {
+            if (Wheels.)
+        }
     }
     
     void UpdateVisualEffects()
@@ -782,11 +692,6 @@ public class F1BrakingSystem : MonoBehaviour
     public void SetBrakeBalance(float newBalance)
     {
         frontBrakes.brakeBalance = Mathf.Clamp01(newBalance);
-    }
-    
-    public void EmergencyBrake()
-    {
-        brakeInput = 1f;
     }
     
     public void SetSurfaceCondition(bool isWet)
