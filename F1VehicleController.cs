@@ -56,7 +56,8 @@ public class F1VehicleController : MonoBehaviour
         GUILayout.Label("=== Inputs ===");
         GUILayout.Label($"Throttle: {throttle}");
         GUILayout.Label($"Brake: {brake}");
-        GUILayout.HorizontalSlider()
+        GUILayout.HorizontalSlider(steerAngle, -1f, 1f);
+        GUILayout.EndArea();
         
     }
 }
