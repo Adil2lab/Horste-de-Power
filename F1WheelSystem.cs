@@ -70,6 +70,8 @@ public class WheelData
     public float mass = 12f; // kg including tire
     public float inertia = 1.5f; // kg⋅m²
     public float slipRatio = 0f;
+    public WheelPhysicsSys WheelPhysicsSys;
+    public float wheelSpeed = 0f; // m/s
     
     [Header("Physics")]
     public Vector3 contactPoint = Vector3.zero;
@@ -77,6 +79,7 @@ public class WheelData
     public bool hasGroundContact = false;
     public float groundDistance = 0f;
     public RaycastHit groundHit;
+    public float angularVelocity = 0f; // rad/s
     
     [Header("Contact Patch")]
     public float contactPatchArea = 300f; // cm²
@@ -142,7 +145,7 @@ public class F1WheelSystem : MonoBehaviour
 
     void UpdateWheelSys()
     {
-        if (physics.wheelTransform == null) continue;
+        if (physics.wheelTransform == null) return;
             
         // Ground detection via raycast
         Vector3 rayStart = physics.wheelTransform.position;
@@ -317,6 +320,11 @@ public class F1WheelSystem : MonoBehaviour
     public bool GetTyreContact()
     {
         return physics.hasGroundContact;
+    }
+
+    public float GetWheelSpeed()
+    {
+        return physics.wheelSpeed;
     }
     
     public Vector3 GetTotalForce()

@@ -247,9 +247,6 @@ public class F1BrakingSystem : MonoBehaviour
         Vector3 acceleration = (vehicleRigidbody.linearVelocity - lastVelocity) / deltaTime;
         lastVelocity = vehicleRigidbody.linearVelocity;
         
-        // Update wheel physics
-        UpdateWheelPhysicsSys(deltaTime);
-        
         // Update brake system
         UpdateBrakeForces(deltaTime);
         
@@ -272,14 +269,6 @@ public class F1BrakingSystem : MonoBehaviour
         
         // Update system states
         UpdateSystemStates();
-    }
-    
-    void UpdateWheelPhysicsSys(float deltaTime)
-    {
-        foreach (var brake in allBrakes)
-        {
-            
-        }
     }
     
     void UpdateBrakeForces(float deltaTime)
@@ -516,6 +505,7 @@ public class F1BrakingSystem : MonoBehaviour
         for (var i = 0; i <= allBrakes.Length; i++)
         {
             allBrakes[i].hasGroundContact = Wheels[i].GetTyreContact();
+            allBrakes[i].wheelSpeed = Wheels[i].GetWheelSpeed();
         }
     }
     
