@@ -100,6 +100,7 @@ public class BrakeData
     public float angularVelocity = 0f; // rad/s
     public float wheelSpeed = 0f; // m/s (circumferential)
     public bool hasGroundContact;
+    public float slipRatio = 0f;
     
     [Header("Brake State")]
     public float currentTemperature;
@@ -149,7 +150,7 @@ public class F1BrakingSystem : MonoBehaviour
     public BrakeData frontRightBrake;
     public BrakeData rearLeftBrake;
     public BrakeData rearRightBrake;
-    public WheelData[] Wheels;
+    public F1WheelSystem[] Wheels;
     
     [Header("Vehicle References")]
     public Rigidbody vehicleRigidbody;
@@ -512,9 +513,9 @@ public class F1BrakingSystem : MonoBehaviour
 
         brakeInput = VController.GetBrakeInput();
         
-        for (var i = 0; i >= allBrakes.Length; i++)
+        for (var i = 0; i <= allBrakes.Length; i++)
         {
-            if (Wheels.)
+            allBrakes[i].hasGroundContact = Wheels[i].GetTyreContact();
         }
     }
     
@@ -751,10 +752,6 @@ public class F1BrakingSystem : MonoBehaviour
                 }
             }
         }
-        
-        GUILayout.Label("\nControls:");
-        GUILayout.Label($"Brake: {brakeKey} / {brakeInputAxis}");
-        GUILayout.Label($"Toggle ABS: {absToggleKey}");
         
         GUILayout.EndArea();
     }
